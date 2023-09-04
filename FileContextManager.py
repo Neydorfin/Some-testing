@@ -7,16 +7,17 @@ class File:
 
     Args:
         path (str): Путь к файлу.
-        method (str): Режим открытия файла ('r' - чтение, 'w' - запись, 'a' - добавление, 'rw' - чтение и запись).
+        mode (str): Режим открытия файла ('r' - чтение, 'w' - запись, 'a' - добавление, 'r+','w+' - чтение и запись).
 
     Attributes:
         path (str): Путь к файлу.
-        meth_to_open (int): Флаги для открытия файла на основе переданного метода.
+        method (int): Флаги для открытия файла на основе переданного метода.
+        mode (str): Режим открытия файла
         file: Дескриптор файла.
 
     Raises:
-        FileExistsError: Возникает, если передан недопустимый метод.
-
+        ValueError: Возникает, если передан недопустимый метод.
+        FileExistsError: Возникает, если передан недопустимый путь файлу
     Methods:
         __enter__: Метод для открытия файла в контексте.
         __exit__: Метод для закрытия файла в контексте.
@@ -24,39 +25,42 @@ class File:
         read() -> str: Считывает данные из файла.
 
     Example:
-        with File('example.txt', 'w') as file:
-            file.write('Hello, World!')
+        with File('example.txt', 'w+') as file:
+            file.write('Hello, World!\n')
             data = file.read()
             print(data)
     """
 
-    def __init__(self, path: str, method: str) -> None:
+    def __init__(self, path: str, mode: str = 'r') -> None:
         """
         Инициализирует объект File.
 
         Args:
             path (str): Путь к файлу.
-            method (str): Режим открытия файла ('r' - чтение, 'w' - запись, 'a' - добавление, 'rw' - чтение и запись).
+            mode (str): Режим открытия файла ('r' - чтение,
+                                              'w' - запись,
+                                              'a' - добавление,
+                                              'r+','w+' - чтение и запись).
 
         Raises:
-            FileExistsError: Возникает, если передан недопустимый метод.
+            ValueError: Возникает, если передан недопустимый метод.
         """
-        self.meth_to_open = None
-        if method.lower() == 'r':
-            self.meth_to_open = os.O_RDONLY
-        elif method.lower() == 'w':
-            self.meth_to_open = os.O_WRONLY
-        elif method.lower() == 'a':
-            self.meth_to_open = os.O_APPEND
-        elif method.lower() == "rw":
-            self.meth_to_open = os.O_RDWR
+        self.mode = mode.lower()
+        if self.mode == 'r':
+            self.method = os.O_RDONLY
+        elif self.mode == 'w':
+            self.method = os.O_WRONLY
+        elif self.mode == 'a':
+            self.method = os.O_RDWR
+        elif self.mode == "r+" or 'w+':
+            self.method = os.O_RDWR
         else:
-            raise FileExistsError
+            raise ValueError("Передан недопустимый метод: {}".format(mode))
 
-        self.path = path
+        self.path = os.path.join(os.path.abspath(path))
         self.file = None
 
-    def __enter__(self):
+    def __enter__(self) -> 'File':
         """
         Метод для открытия файла в контексте.
 
@@ -64,35 +68,40 @@ class File:
             File: Экземпляр класса File.
         """
         if os.path.exists(self.path):
-            self.file = os.open(path=self.path, flags=self.meth_to_open)
-        elif self.meth_to_open in (os.O_WRONLY, os.O_APPEND, os.O_RDWR):
-            self.file = os.open(path=self.path, flags=os.O_CREAT)
+            self.file = os.open(path=self.path, flags=self.method)
+            self.opened_file = os.fdopen(self.file, mode=self.mode, encoding='utf-8')
+
+        elif self.method in (os.O_WRONLY, os.O_APPEND, os.O_RDWR):
+            self.file = os.open(self.path, flags=self.method | os.O_CREAT)
+            self.opened_file = os.fdopen(self.file, mode=self.mode, encoding='utf-8')
+
         else:
-            raise FileExistsError
+            raise FileExistsError(f"Файл '{self.path}' не найден.")
 
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """
         Метод для закрытия файла в контексте.
         """
-        os.close(self.file)
+        if not self.opened_file.closed:
+            self.opened_file.close()
 
     def write(self, data: str) -> None:
         """
         Записывает данные в файл.
-
         Args:
             data (str): Данные для записи.
         """
-        data = bytes(data, encoding='utf-8')
-        os.write(self.file, data)
+        self.opened_file.write(data)
 
-    def read(self) -> str:
+    def read(self, n=516) -> str:
         """
         Считывает данные из файла.
-
         Returns:
             str: Считанные данные в виде строки.
+
         """
-        return os.read(self.file, 1024, ).decode('utf-8')
+        return self.opened_file.read(n)
+
+
